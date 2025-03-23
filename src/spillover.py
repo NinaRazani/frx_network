@@ -183,12 +183,6 @@ def test_stat_two_sided(cr_corr, T, M=None, kernel='daniell'):
 #hong2009: spillover of risk(value at risk measure(risk exceedence))
 #calculate value at risk
 
-import numpy as np
-import pandas as pd
-from scipy import stats
-from statsmodels.regression.linear_model import OLS
-from statsmodels.tools.tools import add_constant
-
 def calculate_var(returns, alpha=0.05, window=500):
     """
     Calculate Value at Risk (VaR) using historical simulation method
@@ -322,6 +316,7 @@ def kernel_test(z1, z2, max_lag, kernel_func):
     
     return q1
 
+
 def test_granger_causality_risk(returns1, returns2, alpha=0.05, window=500, max_lag=20):
     """
     Test for Granger causality in risk between two return series
@@ -394,7 +389,8 @@ def test_granger_causality_risk(returns1, returns2, alpha=0.05, window=500, max_
         'max_lag': max_lag
     }
 
-def pairwise_granger_causality_risk(returns_df, alpha=0.05, window=500, max_lag=20, method='daniell'):
+
+def pairwise_granger_causality_risk(returns_df, alpha=0.05, window=500, max_lag=20, method='daniell', return_stats=True):
     """
     Perform pairwise Granger causality in risk tests for all pairs in a DataFrame
     
@@ -404,9 +400,10 @@ def pairwise_granger_causality_risk(returns_df, alpha=0.05, window=500, max_lag=
     window (int): Rolling window for VaR calculation (default: 500)
     max_lag (int): Maximum lag for testing (default: 20)
     method (str): Method to use for testing (default: 'daniell', options: 'reg', 'trun', 'daniell')
+    return_stats (bool): If True, return test statistics Q1 instead of p-values
     
     Returns:
-    pd.DataFrame: Matrix of p-values for Granger causality tests
+    pd.DataFrame: Matrix of test statistics or p-values for Granger causality tests
     """
     n_series = returns_df.shape[1]
     currencies = returns_df.columns
@@ -414,14 +411,21 @@ def pairwise_granger_causality_risk(returns_df, alpha=0.05, window=500, max_lag=
     # Initialize results DataFrame
     results = pd.DataFrame(index=currencies, columns=currencies)
     
-    # Method mapping
-    method_map = {
-        'reg': 'p_value_REG',
-        'trun': 'p_value_TRUN',
-        'daniell': 'p_value_DAN'
-    }
+    # Method mapping for statistics or p-values
+    if return_stats:
+        method_map = {
+            'reg': 'Q1REG',
+            'trun': 'Q1TRUN',
+            'daniell': 'Q1DAN'
+        }
+    else:
+        method_map = {
+            'reg': 'p_value_REG',
+            'trun': 'p_value_TRUN',
+            'daniell': 'p_value_DAN'
+        }
     
-    p_value_key = method_map.get(method.lower(), 'p_value_DAN')
+    result_key = method_map.get(method.lower(), 'Q1DAN' if return_stats else 'p_value_DAN')
     
     # Perform tests for each pair
     for i in range(n_series):
@@ -436,8 +440,8 @@ def pairwise_granger_causality_risk(returns_df, alpha=0.05, window=500, max_lag=
                     max_lag=max_lag
                 )
                 
-                # Store p-value for the selected method
-                results.iloc[i, j] = test_result[p_value_key]
+                # Store test statistic or p-value for the selected method
+                results.iloc[i, j] = test_result[result_key]
             else:
                 results.iloc[i, j] = np.nan
     
