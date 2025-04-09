@@ -1,5 +1,7 @@
 
+import datetime
 from arch import arch_model
+from matplotlib.dates import DateFormatter
 import numpy as np
 import pandas as pd
 from scipy import stats
@@ -10,7 +12,7 @@ from statsmodels.regression.linear_model import OLS
 from statsmodels.tools.tools import add_constant
 
 
-# calculate spillover using Diebold and Yilmaz
+# calculate return spillover using Diebold and Yilmaz(2009), this paper calculate voltility spillover too
 def VAR_model(returns):
     model = VAR(returns)
     lag_order = model.select_order(maxlags=10) 
@@ -19,7 +21,7 @@ def VAR_model(returns):
     # Fit VAR model
     var_model = model.fit(selected_lag)
     # print(var_model.params)  # Print all estimated coefficients
-    print(var_model.resid) 
+    # print(var_model.resid) 
     # print(var_model.coefs)  # (lags, num_vars, num_vars)
     # print(var_model.sigma_u)  # Residual covariance matrix
     # print(f"AIC: {var_model.aic}, BIC: {var_model.bic}, HQIC: {var_model.hqic}") 
@@ -32,7 +34,7 @@ def variance_decomposition(var_model, horizon=10):
     """
     Compute the variance decomposition for a given forecast horizon.
     """
-    fevd = var_model.fevd(horizon)
+    fevd = var_model.fevd(horizon) 
     variance_contributions = fevd.decomp  # Shape: (horizon, N, N)
 
     # Get last-step variance decomposition (H-step ahead)
@@ -80,6 +82,11 @@ def spillover_during_time(returns, selected_lag):
     plt.legend()
     plt.show()
 
+# clculate volatility spillover using Diebold(2012), 
+
+
+
+# ////////////////////////////////////////////////////////////////////////////////////
 
 # compute spillover using Hong2001: spillover of volatility (variance of time series)
 #estimate Garch model
@@ -182,7 +189,6 @@ def test_stat_two_sided(cr_corr, T, M=None, kernel='daniell'):
 
 #hong2009: spillover of risk(value at risk measure(risk exceedence))
 #calculate value at risk
-
 def calculate_var(returns, alpha=0.05, window=500):
     """
     Calculate Value at Risk (VaR) using historical simulation method
@@ -360,13 +366,13 @@ def test_granger_causality_risk(returns1, returns2, alpha=0.05, window=500, max_
     X = add_constant(X)
     
     # Run regression
-    model = OLS(y, X).fit()
+    # model = OLS(y, X).fit()
     
-    # Calculate Q1REG statistic
-    T = len(y)
-    M = max_lag
-    r_squared = model.rsquared
-    q1reg = (T * r_squared - M) / np.sqrt(2 * M)
+    # # Calculate Q1REG statistic
+    # T = len(y)
+    # M = max_lag
+    # r_squared = model.rsquared
+    # q1reg = (T * r_squared - M) / np.sqrt(2 * M)
     
     # Method 2: Truncated kernel test (Q1TRUN)
     q1trun = kernel_test(z1, z2, max_lag, truncated_kernel)
@@ -375,13 +381,13 @@ def test_granger_causality_risk(returns1, returns2, alpha=0.05, window=500, max_
     q1dan = kernel_test(z1, z2, max_lag, daniell_kernel)
     
     # Calculate p-values (asymptotically standard normal)
-    p_value_reg = 2 * (1 - stats.norm.cdf(abs(q1reg)))
+    # p_value_reg = 2 * (1 - stats.norm.cdf(abs(q1reg)))
     p_value_trun = 2 * (1 - stats.norm.cdf(abs(q1trun)))
     p_value_dan = 2 * (1 - stats.norm.cdf(abs(q1dan)))
     
     return {
-        'Q1REG': q1reg,
-        'p_value_REG': p_value_reg,
+        # 'Q1REG': q1reg,
+        # 'p_value_REG': p_value_reg,
         'Q1TRUN': q1trun,
         'p_value_TRUN': p_value_trun,
         'Q1DAN': q1dan,
@@ -390,7 +396,7 @@ def test_granger_causality_risk(returns1, returns2, alpha=0.05, window=500, max_
     }
 
 
-def pairwise_granger_causality_risk(returns_df, alpha=0.05, window=500, max_lag=20, method='daniell', return_stats=True):
+def pairwise_granger_causality_risk(returns_df, alpha=0.05, window=500, max_lag=24, method='daniell', return_stats=True):
     """
     Perform pairwise Granger causality in risk tests for all pairs in a DataFrame
     
@@ -446,4 +452,156 @@ def pairwise_granger_causality_risk(returns_df, alpha=0.05, window=500, max_lag=
                 results.iloc[i, j] = np.nan
     
     return results
+
+
+##time-varying granger causality test
+def time_varying_pairwise_granger_causality_risk(returns_df, alpha=0.05, window=500, max_lag=20, 
+                                                 method='daniell', return_stats=True, rolling_window=250, step_size=50):
+    """
+    Perform time-varying pairwise Granger causality in risk tests for all pairs in a DataFrame
+    
+    Parameters:
+    returns_df (pd.DataFrame): DataFrame with return series as columns
+    alpha (float): Significance level for VaR (default: 0.05)
+    window (int): Rolling window for VaR calculation (default: 500)
+    max_lag (int): Maximum lag for testing (default: 20)
+    method (str): Method to use for testing (default: 'daniell', options: 'reg', 'trun', 'daniell')
+    return_stats (bool): If True, return test statistics Q1 instead of p-values
+    rolling_window (int): Size of the rolling window for time-varying analysis (default: 250)
+    step_size (int): Step size for rolling windows (default: 50)
+    
+    Returns:
+    dict: Dictionary of DataFrames containing matrices of test statistics or p-values for each time window
+    """
+    
+    n_series = returns_df.shape[1]
+    currencies = returns_df.columns
+    
+    # Method mapping for statistics or p-values
+    if return_stats:
+        method_map = {
+            'reg': 'Q1REG',
+            'trun': 'Q1TRUN',
+            'daniell': 'Q1DAN'
+        }
+    else:
+        method_map = {
+            'reg': 'p_value_REG',
+            'trun': 'p_value_TRUN',
+            'daniell': 'p_value_DAN'
+        }
+    
+    result_key = method_map.get(method.lower(), 'Q1DAN' if return_stats else 'p_value_DAN')
+    
+    # Compute the number of rolling windows
+    data_length = len(returns_df)
+    n_windows = (data_length - rolling_window) // step_size + 1
+    
+    # Dictionary to store results
+    time_varying_results = {}
+    
+    # For each window
+    for w in range(n_windows):
+        start_idx = w * step_size
+        end_idx = start_idx + rolling_window
+        
+        # Get data for this window
+        window_data = returns_df.iloc[start_idx:end_idx]
+        
+        # Initialize results DataFrame for this window
+        window_label = f"{window_data.index[0].strftime('%Y-%m-%d')} to {window_data.index[-1].strftime('%Y-%m-%d')}"
+        results = pd.DataFrame(index=currencies, columns=currencies)
+        
+        # Perform tests for each pair
+        for i in range(n_series):
+            for j in range(n_series):
+                if i != j:
+                    # Test if j Granger-causes i in risk
+                    try:
+                        test_result = test_granger_causality_risk(
+                            window_data.iloc[:, i], 
+                            window_data.iloc[:, j],
+                            alpha=alpha, 
+                            window=min(window, rolling_window // 2),  # Adjust VaR window size if needed
+                            max_lag=max_lag
+                        )
+                        # Store test statistic or p-value for the selected method
+                        results.iloc[i, j] = test_result[result_key]
+                    except Exception as e:
+                        # Handle possible errors (insufficient data, etc.)
+                        results.iloc[i, j] = np.nan
+                else:
+                    results.iloc[i, j] = np.nan
+        
+        # Store results for this window
+        time_varying_results[window_label] = results
+    
+    return time_varying_results
+
+def visualize_time_varying_causality(time_varying_results, significance_threshold=1.96, selected_pairs=None):
+    """
+    Visualize the time-varying Granger causality in risk results
+    
+    Parameters:
+    time_varying_results (dict): Results from time_varying_pairwise_granger_causality_risk
+    significance_threshold (float): Threshold for significance (default: 1.96 for abs(Q1))
+    selected_pairs (list): List of tuples of currency pairs to visualize, e.g. [('EUR', 'USD'), ('GBP', 'JPY')]
+                          If None, will try to visualize all relationships (may be overcrowded)
+    
+    Returns:
+    matplotlib figure: Figure with time-varying plots
+    """    
+    # Extract time window labels and convert to datetime
+    time_points = [datetime.datetime.strptime(window.split(' to ')[0], '%Y-%m-%d') for window in time_varying_results.keys()]
+    
+    # Get currency pairs
+    first_window = list(time_varying_results.values())[0]
+    currencies = first_window.columns
+    
+    # If no pairs are selected, create all possible pairs
+    if selected_pairs is None:
+        selected_pairs = [(currencies[i], currencies[j]) for i in range(len(currencies)) for j in range(len(currencies)) if i != j]
+    
+    # Limit to a reasonable number if too many
+    if len(selected_pairs) > 9:
+        selected_pairs = selected_pairs[:9]
+        print(f"Too many pairs to visualize. Only showing the first 9: {selected_pairs}")
+    
+    # Create figure with subplots
+    fig, axes = plt.subplots(len(selected_pairs), 1, figsize=(12, 3*len(selected_pairs)), sharex=True)
+    if len(selected_pairs) == 1:
+        axes = [axes]  # Make axes subscriptable if only one pair
+    
+    # For each selected pair
+    for idx, (currency_i, currency_j) in enumerate(selected_pairs):
+        # Extract time series of test statistics for this pair
+        values = []
+        for window, result_df in time_varying_results.items():
+            if currency_i in result_df.index and currency_j in result_df.columns:
+                values.append(result_df.loc[currency_i, currency_j])
+            else:
+                values.append(np.nan)
+        
+        # Plot
+        ax = axes[idx]
+        ax.plot(time_points, values, marker='o', linestyle='-')
+        ax.axhline(y=significance_threshold, color='r', linestyle='--', alpha=0.7, label=f'Threshold (+{significance_threshold})')
+        ax.axhline(y=-significance_threshold, color='r', linestyle='--', alpha=0.7, label=f'Threshold (-{significance_threshold})')
+        ax.set_title(f"{currency_j} → {currency_i} Causality in Risk")
+        ax.set_ylabel('Q1 Statistic')
+        ax.grid(True, alpha=0.3)
+        
+        # Only show legend for first subplot
+        if idx == 0:
+            ax.legend()
+    
+    # Format x-axis
+    axes[-1].set_xlabel('Time')
+    axes[-1].xaxis.set_major_formatter(DateFormatter('%Y-%m-%d'))
+    plt.xticks(rotation=45)
+    plt.tight_layout()
+    
+    return fig
+
+
 
